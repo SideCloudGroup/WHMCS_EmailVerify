@@ -1,0 +1,100 @@
+.ev-card {
+    max-width: 460px;
+    margin: 40px auto;
+}
+
+.ev-card .ev-title {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 1.5rem;
+}
+
+.ev-code-input {
+    height: auto;
+    padding: 10px 12px;
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .3em;
+    text-align: center;
+}
+
+.ev-code-input::placeholder {
+    font-size: 1rem;
+    font-weight: 400;
+    letter-spacing: normal;
+}
+
+.ev-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.ev-actions .btn {
+    flex: 1 1 0;
+}
+
+.ev-footer {
+    margin: 18px 0 0;
+    font-size: .9em;
+    text-align: center;
+}
+
+.ev-support {
+    margin: 12px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid rgba(0, 0, 0, .08);
+    font-size: .85em;
+    text-align: center;
+}
+
+.ev-inline {
+    margin: 0 0 15px;
+}
+
+.ev-row {
+    display: flex;
+    gap: 8px;
+}
+
+.ev-row .form-control {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ev-row .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.ev-msg {
+    min-height: 1.25em;
+    margin-top: 8px;
+    font-size: .875em;
+}
+
+.ev-msg.is-error {
+    color: #dc3545;
+}
+
+.ev-msg.is-success,
+.ev-done {
+    color: #28a745;
+}
+
+.ev-msg.is-info {
+    color: #6c757d;
+}
+
+.ev-done {
+    font-size: .875em;
+}
+
+.ev-done::before {
+    content: "\2713\00a0";
+}
+
+.ev-inline [hidden],
+.ev-card [hidden] {
+    display: none !important;
+}
