@@ -67,7 +67,7 @@
     white-space: nowrap;
 }
 
-.ev-captcha {
+.ev-captcha:not([hidden]) {
     margin-top: 8px;
 }
 
