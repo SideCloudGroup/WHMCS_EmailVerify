@@ -67,6 +67,10 @@
     white-space: nowrap;
 }
 
+.ev-captcha {
+    margin-top: 8px;
+}
+
 .ev-msg {
     min-height: 1.25em;
     margin-top: 8px;
