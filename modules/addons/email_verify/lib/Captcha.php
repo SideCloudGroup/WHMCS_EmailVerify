@@ -54,9 +54,10 @@ final class Captcha
         if ($endpoint === '' && function_exists('hybula_captcha_cap_endpoint')) {
             $endpoint = (string) hybula_captcha_cap_endpoint();
         }
+        $name = defined('hybulaCaptchaDriver') ? (string) constant('hybulaCaptchaDriver') : '';
         return [
             'required' => true,
-            'driver' => defined('hybulaCaptchaDriver') ? (string) constant('hybulaCaptchaDriver') : '',
+            'driver' => $name,
             'field' => method_exists($driver, 'tokenField') ? (string) $driver->tokenField() : '',
             'script' => method_exists($driver, 'scriptSrc') ? (string) $driver->scriptSrc() : '',
             'scriptAsync' => method_exists($driver, 'scriptAsync') ? (bool) $driver->scriptAsync() : true,
@@ -65,6 +66,10 @@ final class Captcha
             'sitekey' => self::widgetAttribute($widget, 'sitekey'),
             'theme' => self::widgetAttribute($widget, 'theme'),
             'endpoint' => $endpoint,
+            // Send-code uses an on-click challenge, not the visible register-form widget.
+            'execution' => 'execute',
+            'appearance' => 'execute',
+            'size' => $name === 'hcaptcha' ? 'invisible' : '',
         ];
     }
 
