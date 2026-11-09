@@ -48,47 +48,113 @@
         });
     }
 
-    var capLoading = null;
+    var captchaScriptLoading = null;
 
-    function loadCap() {
-        if (window.Cap) {
-            return Promise.resolve(window.Cap);
+    function captchaDriver() {
+        var spec = cfg.captcha || {};
+        if (spec.driver) {
+            return spec.driver;
         }
-        if (capLoading) {
-            return capLoading;
+        var selector = spec.selector || '';
+        if (selector.indexOf('cap-widget') !== -1) {
+            return 'cap';
         }
-        capLoading = new Promise(function (resolve, reject) {
+        if (selector.indexOf('turnstile') !== -1) {
+            return 'turnstile';
+        }
+        if (selector.indexOf('h-captcha') !== -1 || selector.indexOf('hcaptcha') !== -1) {
+            return 'hcaptcha';
+        }
+        return '';
+    }
+
+    function captchaApiReady() {
+        var driver = captchaDriver();
+        if (driver === 'cap') {
+            return window.Cap || null;
+        }
+        if (driver === 'turnstile') {
+            return window.turnstile && window.turnstile.render ? window.turnstile : null;
+        }
+        if (driver === 'hcaptcha') {
+            return window.hcaptcha && window.hcaptcha.render ? window.hcaptcha : null;
+        }
+        return window.Cap || window.turnstile || window.hcaptcha || null;
+    }
+
+    function widgetAttr(name) {
+        var html = (cfg.captcha && cfg.captcha.widget) || '';
+        var wrap = document.createElement('div');
+        wrap.innerHTML = html;
+        var el = cfg.captcha && cfg.captcha.selector ? wrap.querySelector(cfg.captcha.selector) : wrap.firstElementChild;
+        if (!el) {
+            el = wrap.firstElementChild;
+        }
+        return el ? (el.getAttribute('data-' + name) || '') : '';
+    }
+
+    function stripCaptchaFieldNames(root) {
+        if (!root || !cfg.captcha || !cfg.captcha.field) {
+            return;
+        }
+        var nodes = root.querySelectorAll('[name="' + cfg.captcha.field + '"]');
+        for (var i = 0; i < nodes.length; i++) {
+            nodes[i].removeAttribute('name');
+        }
+    }
+
+    function loadCaptchaScript() {
+        var spec = cfg.captcha || {};
+        var ready = captchaApiReady();
+        if (ready) {
+            return Promise.resolve(ready);
+        }
+        if (!spec.script) {
+            return Promise.reject(new Error('Captcha unavailable'));
+        }
+        if (captchaScriptLoading) {
+            return captchaScriptLoading;
+        }
+        captchaScriptLoading = new Promise(function (resolve, reject) {
             // The captcha hook may already have injected the same widget script; never load it twice.
             var started = Date.now();
-            var existing = document.querySelector('script[src="' + cfg.captcha.script + '"]');
+            var existing = document.querySelector('script[src="' + spec.script + '"]');
             if (!existing) {
                 existing = document.createElement('script');
-                existing.src = cfg.captcha.script;
-                existing.async = true;
+                existing.src = spec.script;
+                if (spec.scriptAsync !== false) {
+                    existing.async = true;
+                    existing.defer = true;
+                }
                 document.head.appendChild(existing);
             }
             (function wait() {
-                if (window.Cap) {
-                    resolve(window.Cap);
+                var api = captchaApiReady();
+                if (api) {
+                    resolve(api);
                 } else if (Date.now() - started > 15000) {
-                    reject(new Error('Cap widget unavailable'));
+                    reject(new Error('Captcha widget unavailable'));
                 } else {
                     setTimeout(wait, 100);
                 }
             })();
         });
-        capLoading.catch(function () {
-            capLoading = null;
+        captchaScriptLoading.catch(function () {
+            captchaScriptLoading = null;
         });
-        return capLoading;
+        return captchaScriptLoading;
     }
 
-    function solveCaptcha() {
-        if (!cfg.captcha) {
-            return Promise.resolve('');
+    function solveCap() {
+        var endpoint = (cfg.captcha && cfg.captcha.endpoint) || widgetAttr('cap-api-endpoint');
+        if (!endpoint) {
+            return Promise.reject(new Error('Captcha endpoint missing'));
         }
-        return loadCap().then(function (Cap) {
-            return new Cap({ apiEndpoint: cfg.captcha.endpoint }).solve();
+        return loadCaptchaScript().then(function () {
+            if (!window.Cap) {
+                throw new Error('Cap widget unavailable');
+            }
+            return new window.Cap({ apiEndpoint: endpoint }).solve();
         }).then(function (solution) {
             if (!solution || !solution.token) {
                 throw new Error('Captcha not solved');
@@ -105,11 +171,19 @@
         this.messageBox = options.messageBox;
         this.getEmail = options.getEmail || function () { return ''; };
         this.onVerified = options.onVerified;
+        this.captchaBox = options.captchaBox || null;
         this.timer = null;
         this.sending = false;
         this.verifying = false;
         this.sentTo = null;
+        this.captchaToken = '';
+        this.captchaWidgetId = null;
+        this.captchaReady = null;
+        this.captchaWaiters = [];
         this.bind();
+        if (this.mode === 'register' && cfg.captcha && cfg.captcha.script && captchaDriver() !== 'cap') {
+            this.mountWidgetCaptcha();
+        }
     }
 
     CodeWidget.prototype.bind = function () {
@@ -173,6 +247,142 @@
         }
     };
 
+    CodeWidget.prototype.flushCaptchaWaiters = function (err, token) {
+        var waiters = this.captchaWaiters;
+        this.captchaWaiters = [];
+        for (var i = 0; i < waiters.length; i++) {
+            waiters[i](err, token);
+        }
+    };
+
+    CodeWidget.prototype.mountWidgetCaptcha = function () {
+        var self = this;
+        if (self.captchaReady) {
+            return self.captchaReady;
+        }
+        self.captchaReady = loadCaptchaScript().then(function () {
+            var driver = captchaDriver();
+            var box = self.captchaBox;
+            if (!box || driver === 'cap') {
+                return;
+            }
+            var sitekey = (cfg.captcha && cfg.captcha.sitekey) || widgetAttr('sitekey');
+            var theme = (cfg.captcha && cfg.captcha.theme) || widgetAttr('theme') || 'auto';
+            if (!sitekey) {
+                throw new Error('Captcha sitekey missing');
+            }
+            box.hidden = false;
+            box.innerHTML = '';
+            var host = document.createElement('div');
+            host.className = 'ev-captcha-challenge';
+            box.appendChild(host);
+            if (driver === 'turnstile' && window.turnstile && window.turnstile.render) {
+                self.captchaWidgetId = window.turnstile.render(host, {
+                    sitekey: sitekey,
+                    theme: theme,
+                    'response-field': false,
+                    callback: function (token) {
+                        self.captchaToken = token;
+                        stripCaptchaFieldNames(box);
+                        self.flushCaptchaWaiters(null, token);
+                    },
+                    'expired-callback': function () {
+                        self.captchaToken = '';
+                    }
+                });
+                stripCaptchaFieldNames(box);
+                return;
+            }
+            if (driver === 'hcaptcha' && window.hcaptcha && window.hcaptcha.render) {
+                self.captchaWidgetId = window.hcaptcha.render(host, {
+                    sitekey: sitekey,
+                    theme: theme === 'auto' ? 'light' : theme,
+                    callback: function (token) {
+                        self.captchaToken = token;
+                        stripCaptchaFieldNames(box);
+                        self.flushCaptchaWaiters(null, token);
+                    },
+                    'expired-callback': function () {
+                        self.captchaToken = '';
+                    }
+                });
+                stripCaptchaFieldNames(box);
+                return;
+            }
+            throw new Error('Captcha driver unavailable');
+        });
+        self.captchaReady.catch(function () {
+            self.captchaReady = null;
+        });
+        return self.captchaReady;
+    };
+
+    CodeWidget.prototype.resetCaptchaWidget = function () {
+        var driver = captchaDriver();
+        try {
+            if (driver === 'turnstile' && window.turnstile && this.captchaWidgetId != null) {
+                window.turnstile.reset(this.captchaWidgetId);
+                stripCaptchaFieldNames(this.captchaBox);
+            }
+            if (driver === 'hcaptcha' && window.hcaptcha && this.captchaWidgetId != null) {
+                window.hcaptcha.reset(this.captchaWidgetId);
+                stripCaptchaFieldNames(this.captchaBox);
+            }
+        } catch (e) {}
+    };
+
+    CodeWidget.prototype.takeCaptchaToken = function (token) {
+        token = token || this.captchaToken;
+        this.captchaToken = '';
+        this.resetCaptchaWidget();
+        if (!token) {
+            throw new Error('Captcha not solved');
+        }
+        return token;
+    };
+
+    CodeWidget.prototype.waitCaptchaToken = function (timeout) {
+        var self = this;
+        if (self.captchaToken) {
+            return Promise.resolve(self.captchaToken);
+        }
+        return new Promise(function (resolve, reject) {
+            var waiter = function (err, token) {
+                clearTimeout(timer);
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(token);
+                }
+            };
+            var timer = setTimeout(function () {
+                self.captchaWaiters = self.captchaWaiters.filter(function (fn) {
+                    return fn !== waiter;
+                });
+                reject(new Error('Captcha timeout'));
+            }, timeout);
+            self.captchaWaiters.push(waiter);
+        });
+    };
+
+    CodeWidget.prototype.solveCaptcha = function () {
+        var self = this;
+        if (!cfg.captcha) {
+            return Promise.resolve('');
+        }
+        if (captchaDriver() === 'cap') {
+            return solveCap();
+        }
+        return self.mountWidgetCaptcha().then(function () {
+            if (self.captchaToken) {
+                return self.captchaToken;
+            }
+            return self.waitCaptchaToken(20000);
+        }).then(function (token) {
+            return self.takeCaptchaToken(token);
+        });
+    };
+
     CodeWidget.prototype.send = function () {
         var self = this;
         var payload = {};
@@ -193,7 +403,7 @@
         var ready = Promise.resolve();
         if (this.mode === 'register' && cfg.captcha) {
             this.sendButton.textContent = t.btn_captcha;
-            ready = solveCaptcha().then(function (token) {
+            ready = this.solveCaptcha().then(function (token) {
                 payload.cap_token = token;
             });
         }
@@ -319,6 +529,7 @@
                 '<input type="text" class="form-control" data-ev-code inputmode="numeric" autocomplete="one-time-code">' +
                 '<button type="button" class="btn btn-default btn-outline-secondary" data-ev-send></button>' +
             '</div>' +
+            '<div class="ev-captcha" data-ev-captcha hidden></div>' +
             '<div class="ev-msg" data-ev-msg role="status" aria-live="polite"></div>' +
             '<div class="ev-done" data-ev-done hidden></div>';
         anchor.parentNode.insertBefore(box, anchor.nextSibling);
@@ -340,6 +551,7 @@
             sendButton: sendButton,
             codeInput: codeInput,
             messageBox: box.querySelector('[data-ev-msg]'),
+            captchaBox: box.querySelector('[data-ev-captcha]'),
             getEmail: function () {
                 return emailInput.value;
             },
@@ -359,6 +571,9 @@
             done.hidden = false;
             codeInput.value = '';
             widget.message('');
+            if (widget.captchaBox) {
+                widget.captchaBox.hidden = true;
+            }
         }
 
         function sync() {
@@ -376,6 +591,9 @@
                 done.hidden = true;
                 codeInput.value = '';
                 widget.message('');
+                if (widget.captchaBox && cfg.captcha && cfg.captcha.script && captchaDriver() !== 'cap') {
+                    widget.captchaBox.hidden = false;
+                }
             }
         }
 
@@ -388,6 +606,9 @@
     function guardSubmit(event) {
         for (var i = 0; i < inlineEntries.length; i++) {
             var entry = inlineEntries[i];
+            if (entry.widget && entry.widget.captchaBox) {
+                stripCaptchaFieldNames(entry.widget.captchaBox);
+            }
             if (entry.form !== event.target || entry.verifiedEmail !== null || !isVisible(entry.box)) {
                 continue;
             }

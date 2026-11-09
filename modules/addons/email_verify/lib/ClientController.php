@@ -95,7 +95,7 @@ final class ClientController
         if (Session::isEmailVerified($email)) {
             Http::json(['ok' => true, 'verified' => true, 'message' => Lang::get('msg_verified_inline')]);
         }
-        if (Captcha::enabled() && !Captcha::verify(self::input('cap_token'))) {
+        if (Captcha::required() && !Captcha::verify(self::input('cap_token'))) {
             Http::fail(Lang::get('msg_captcha_failed'));
         }
         Http::json(CodeService::send(CodeService::REGISTER, $email, ''));

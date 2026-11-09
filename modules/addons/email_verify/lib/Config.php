@@ -7,7 +7,7 @@ use WHMCS\Database\Capsule;
 final class Config
 {
     const MODULE = 'email_verify';
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
 
     private static $values;
 
